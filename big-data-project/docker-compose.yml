@@ -1,0 +1,161 @@
+version: '3.8'
+
+services:
+  zookeeper:
+    image: bitnami/zookeeper:latest
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+
+  kafka:
+    image: bitnami/kafka:latest
+    container_name: kafka
+    ports:
+      - "9092:9092"
+    environment:
+      - KAFKA_BROKER_ID=1
+      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+      - ALLOW_PLAINTEXT_LISTENER=yes
+
+  hdfs-namenode:
+    image: hadoop-namenode:arm64
+    container_name: hdfs-namenode
+    hostname: namenode
+    ports:
+      - "9870:9870"  # NameNode web UI
+      - "9000:9000"  # NameNode RPC
+    environment:
+      - CLUSTER_NAME=test
+    volumes:
+      - namenode:/hadoop/dfs/name
+      - ./hadoop-namenode:/opt/hadoop/etc/hadoop
+
+  hdfs-datanode:
+    image: hadoop-datanode:arm64
+    container_name: hdfs-datanode
+    hostname: datanode
+    ports:
+      - "9864:9864"  # DataNode web UI
+    environment:
+      - CLUSTER_NAME=test
+    depends_on:
+      - hdfs-namenode
+    volumes:
+      - datanode:/hadoop/dfs/data
+      - ./hadoop-datanode:/opt/hadoop/etc/hadoop
+
+
+  spark-master:
+    image: bitnami/spark:latest
+    container_name: spark-master
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+    environment:
+      - SPARK_MODE=master
+
+  spark-worker:
+    image: bitnami/spark:latest
+    container_name: spark-worker
+    depends_on:
+      - spark-master
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER=spark://spark-master:7077
+    ports:
+      - "8081:8081"
+
+  spark-notebook:
+    image: vengleab/docker-hive-arm:spark-notebook
+    build:
+      context: ./notebooks
+    user: root
+    environment:
+      - JUPYTER_ENABLE_LAB="yes"
+      - GRANT_SUDO="yes"
+    volumes:
+      - ./notebooks:/home/jovyan/work
+      - ./notebooks/spark-defaults.conf:/usr/local/spark/conf/spark-defaults.conf
+    ports:
+      - "8888:8888"
+      - "4040:4040"
+
+  # hive-server:
+  #   image: hive-server:arm64
+  #   container_name: hive-server
+  #   hostname: hive-server
+  #   depends_on:
+  #     - hdfs-namenode
+  #     - hive-metastore
+  #   env_file:
+  #     - ./hadoop-hive.env
+  #   environment:
+  #     HIVE_CORE_CONF_javax_jdo_option_ConnectionURL: "jdbc:postgresql://hive-metastore/metastore"
+  #     SERVICE_PRECONDITION: "hive-metastore:9083"
+  #   ports:
+  #     - "10000:10000"
+  #   volumes:
+  #     - ./hadoop-namenode:/opt/hadoop/etc/hadoop
+
+
+  # hive-metastore:
+  #   image: hive-metastore:arm64
+  #   container_name: hive-metastore
+  #   hostname: hive-metastore
+  #   depends_on:
+  #     - hdfs-namenode
+  #     - hive-metastore-postgresql
+  #   env_file:
+  #     - ./hadoop-hive.env
+  #   command: /opt/hive/bin/hive --service metastore
+  #   environment:
+  #     SERVICE_PRECONDITION: "hdfs-namenode:50070 hdfs-datanode:50075 hive-metastore-postgresql:5432"
+  #   ports:
+  #     - "9083:9083"
+  #   volumes:
+  #     - ./hadoop-namenode:/opt/hadoop/etc/hadoop
+
+  # hive-metastore-postgresql:
+  #   image: postgres:latest
+  #   container_name: hive-metastore-postgresql
+  #   hostname: hive-metastore-postgresql
+  #   environment:
+  #     POSTGRES_DB: metastore
+  #     POSTGRES_USER: hive
+  #     POSTGRES_PASSWORD: hive
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - postgres-data:/var/lib/postgresql/data
+
+  trino:
+    image: trinodb/trino
+    container_name: trino
+    hostname: trino
+    ports:
+      - "8082:8080"
+    depends_on:
+      - hdfs-namenode
+  
+  cassandra:
+    image: cassandra:latest
+    container_name: cassandra
+    ports:
+      - "9042:9042"
+
+  grafana:
+    image: grafana/grafana
+    container_name: grafana
+    ports:
+      - "3000:3000"
+
+volumes:
+  namenode:
+  datanode:
+  postgres-data:
+
+networks:
+  default:
+    driver: bridge
