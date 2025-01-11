@@ -39,24 +39,6 @@ Here is the docker-compose.yml configuration for your services:
 version: '3.8'
 
 services:
-  zookeeper:
-    image: bitnami/zookeeper:latest
-    container_name: zookeeper
-    ports:
-      - "2181:2181"
-    environment:
-      - ALLOW_ANONYMOUS_LOGIN=yes
-
-  kafka:
-    image: bitnami/kafka:latest
-    container_name: kafka
-    ports:
-      - "9092:9092"
-    environment:
-      - KAFKA_BROKER_ID=1
-      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
-      - ALLOW_PLAINTEXT_LISTENER=yes
-
   hdfs-namenode:
     image: hadoop-namenode:arm64
     container_name: hdfs-namenode
@@ -118,74 +100,6 @@ services:
     ports:
       - "8888:8888"
       - "4040:4040"
-
-  # hive-server:
-  #   image: hive-server:arm64
-  #   container_name: hive-server
-  #   hostname: hive-server
-  #   depends_on:
-  #     - hdfs-namenode
-  #     - hive-metastore
-  #   env_file:
-  #     - ./hadoop-hive.env
-  #   environment:
-  #     HIVE_CORE_CONF_javax_jdo_option_ConnectionURL: "jdbc:postgresql://hive-metastore/metastore"
-  #     SERVICE_PRECONDITION: "hive-metastore:9083"
-  #   ports:
-  #     - "10000:10000"
-  #   volumes:
-  #     - ./hadoop-namenode:/opt/hadoop/etc/hadoop
-
-  # hive-metastore:
-  #   image: hive-metastore:arm64
-  #   container_name: hive-metastore
-  #   hostname: hive-metastore
-  #   depends_on:
-  #     - hdfs-namenode
-  #     - hive-metastore-postgresql
-  #   env_file:
-  #     - ./hadoop-hive.env
-  #   command: /opt/hive/bin/hive --service metastore
-  #   environment:
-  #     SERVICE_PRECONDITION: "hdfs-namenode:50070 hdfs-datanode:50075 hive-metastore-postgresql:5432"
-  #   ports:
-  #     - "9083:9083"
-  #   volumes:
-  #     - ./hadoop-namenode:/opt/hadoop/etc/hadoop
-
-  # hive-metastore-postgresql:
-  #   image: postgres:latest
-  #   container_name: hive-metastore-postgresql
-  #   hostname: hive-metastore-postgresql
-  #   environment:
-  #     POSTGRES_DB: metastore
-  #     POSTGRES_USER: hive
-  #     POSTGRES_PASSWORD: hive
-  #   ports:
-  #     - "5432:5432"
-  #   volumes:
-  #     - postgres-data:/var/lib/postgresql/data
-
-  trino:
-    image: trinodb/trino
-    container_name: trino
-    hostname: trino
-    ports:
-      - "8082:8080"
-    depends_on:
-      - hdfs-namenode
-  
-  cassandra:
-    image: cassandra:latest
-    container_name: cassandra
-    ports:
-      - "9042:9042"
-
-  grafana:
-    image: grafana/grafana
-    container_name: grafana
-    ports:
-      - "3000:3000"
 
 volumes:
   namenode:
@@ -280,12 +194,78 @@ hadoop fs -copyFromLocal /datasetsFile / # Root Directory
 
 Create the following configuration files for Spark:
 
-- Spark Service
-    - Inside Spark
-    - How Spark work
-- Spark Notebook
-    - For writing jupyter notebook pyspark code
-- Example code using Spark SQL
-    - Load/Read dataset from HDFS
-    - Execute SQL in dataset from HDFS
-    - Function calculation using Spark
+spark-defaults.conf
+
+```bash
+spark.jars                                          jars/*
+spark.sql.extensions                                io.delta.sql.DeltaSparkSessionExtension
+spark.sql.catalog.spark_catalog                     org.apache.spark.sql.delta.catalog.DeltaCatalog
+# s3 configuration
+spark.hadoop.fs.s3.endpoint                        http://minio:9000
+spark.hadoop.fs.s3.access.key                      minio
+spark.hadoop.fs.s3.secret.key                      minio123
+spark.hadoop.fs.s3.path.style.access               true
+spark.hadoop.fs.s3.connection.ssl.enabled          false
+spark.hadoop.fs.s3.impl                            org.apache.hadoop.fs.s3a.S3AFileSystem
+# s3a configuration
+spark.hadoop.fs.s3a.endpoint                        http://minio:9000
+spark.hadoop.fs.s3a.access.key                      minio
+spark.hadoop.fs.s3a.secret.key                      minio123
+spark.hadoop.fs.s3a.path.style.access               true
+spark.hadoop.fs.s3a.connection.ssl.enabled          false
+spark.hadoop.fs.s3a.impl                            org.apache.hadoop.fs.s3a.S3AFileSystem
+```
+
+### **Step 6: Build and Run the Project**
+
+Navigate to the *big-data-project* directory and run the following commands:
+
+For ARM Chip (Mac M1 and up):
+
+```bash
+make build-arm
+make start-arm
+```
+
+### **Step 7: Access the Services**
+
+- **HDFS NameNode Web UI**: `http://localhost:9870`
+- **Spark Master Web UI**: `http://localhost:8080`
+- **Spark Worker Web UI**: `http://localhost:8081`
+- **Jupyter Notebook**: `http://localhost:8888`
+
+### **Step 8: Example Use Case**
+
+Here is an example of how to use Spark to read data from HDFS and perform some transformations:
+
+```bash
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col, sum
+
+# Initialize Spark session
+spark = SparkSession.builder \
+    .appName("AmazonDataProcessing") \
+    .config("spark.hadoop.fs.defaultFS", "hdfs://namenode:9000") \
+    .getOrCreate()
+
+# Read the Amazon data from HDFS
+file_path = "hdfs://namenode:9000/datasets/Amazon Sale Report.csv"
+df = spark.read.csv(file_path, header=True, inferSchema=True)
+
+# Calculate the total sales amount per city
+total_sales_per_city = df.groupBy("ship-city").agg(sum("Amount").alias("total_sales"))
+
+# Show the result
+total_sales_per_city.show()
+
+# Stop the Spark session
+spark.stop()
+```
+
+### **Summary**
+
+This *docker-compose.yml* file sets up a big data environment with the following services:
+
+- **HDFS NameNode and DataNode**: Distributed storage system for managing large datasets.
+- **Spark Master and Worker**: Distributed processing framework for big data analytics.
+- **Spark Notebook**: Jupyter notebook interface for interacting with Spark.
